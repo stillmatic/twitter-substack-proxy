@@ -83,12 +83,19 @@ async function run() {
 
   // 404 handler
   app.use(async function(req, res, next) {
-    const path = req.path.slice(1); // Remove leading slash
+    let path = req.path.slice(1); // Remove leading slash
+  
     try {
+      // if path begins with articles/ then remove it and remove .html from the end
+      if (path.startsWith('articles/')) {
+        path = path.slice(9);
+        path = path.slice(0, -5);
+      }
       const decodedUrl = atob(path);
       const pageData = await generatePage(decodedUrl);
       res.render('article-card-template', pageData);
     } catch (e) {
+      console.log(e);
       res.status(404).send('Not found');
     }
   });

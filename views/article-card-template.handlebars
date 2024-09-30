@@ -15,13 +15,22 @@
     {{#unless manualRedirect}}
     const params = new URLSearchParams(window.location.search)
     if (!params.has('noredirect')) {
-        // redirect to substack url
-        window.location.replace("{{url}}")
+        // Obfuscated redirect to substack url
+        const obfuscatedUrl = "{{url}}".split('').map(char => char.charCodeAt(0).toString(16)).join('');
+        const deobfuscateUrl = (encoded) => decodeURIComponent(encoded.match(/.{1,2}/g).map(hex => '%' + hex).join(''));
+        window.location.replace(deobfuscateUrl(obfuscatedUrl));
     }
     {{/unless }}
     {{#if manualRedirect}}
     window.onload = () => {
-        document.querySelector("#go-to-article").style.display = 'block'
+        document.querySelector("#go-to-article").style.display = 'block';
+        // Deobfuscate the URL when the button is clicked
+        document.querySelector("#go-to-article-btn").addEventListener('click', function(e) {
+            e.preventDefault();
+            const obfuscatedUrl = this.getAttribute('data-url');
+            const deobfuscateUrl = (encoded) => decodeURIComponent(encoded.match(/.{1,2}/g).map(hex => '%' + hex).join(''));
+            window.location.href = deobfuscateUrl(obfuscatedUrl);
+        });
     }
     {{/if}}
 </script>
@@ -79,11 +88,10 @@ html, body {
 </style>
 <div class="container centered">
     <div id="go-to-article" style="display: none;">
-        <a class="button-4" href="{{url}}">Go to article</a>
+        <a id="go-to-article-btn" class="button-4" href="#" data-url="{{url}}">Go to article</a>
         <p>
-            (this manual step is necessary to defeat Twitter's scanning of the link to detect that it redirects to subst*ck)
+            (this step is necessary because of Twitter's censorship, thanks for understanding)
         </p>
     </div>
 </div>
 {{/if}}
-
