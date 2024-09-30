@@ -12,14 +12,41 @@ import * as urlSlug from 'url-slug'
 import * as UrlUtil from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// TODO: how to ensure this doesn't get overwritten between deploys?
 const URLS_DIRECTORY = path.join(__dirname, '../public/articles/')
-
 const expresshandlebars = create();
+
+async function generatePage(url, manualRedirect = false) {
+  const parsedUrl = UrlUtil.parse(url)
+  parsedUrl.search = manualRedirect ? 'manualredirect' : ''
+  const finalUrl = UrlUtil.format(parsedUrl)
+  const hash = btoa(decodeURIComponent(url))
+  const filepath = `${URLS_DIRECTORY}/${hash}.html`
+
+  let htmlPage
+  try {
+    const articleRequest = await fetch(finalUrl);
+    htmlPage = await articleRequest.text();
+  } catch (e) {
+    throw new Error(`Failed to fetch URL: ${e.message}`)
+  }
+
+  const dom = new JSDOM(htmlPage);
+  function query(str) {
+    return dom.window.document.querySelector(str).content
+  }
+  const title = query(`meta[property="og:title"]`) 
+  const description = query(`meta[property="og:description"]`) 
+  const image = query(`meta[name="twitter:image"]`) 
+
+  const templateSource = fs.readFileSync('./views/article-card-template.handlebars', 'utf-8')
+  const generatedtemplate = expresshandlebars.handlebars.compile(templateSource);
+  fs.writeFileSync(filepath, generatedtemplate({ title, description, image, url: finalUrl, manualRedirect }), 'utf-8');
+
+  return { title, description, image, url: finalUrl, manualRedirect };
+}
 
 async function run() {
   fs.mkdirSync(URLS_DIRECTORY, { recursive: true });
-
   const app = express();
   app.engine('handlebars', engine({
     helpers: {
@@ -31,59 +58,44 @@ async function run() {
   app.set('views', './views');
   app.use(express.json());
 
-  ///// Pages
   app.get("/", async function (request, response) {
     response.render('index', { average:0 })
   });
+
   app.get("/generate-url/:url/:manualRedirect?", async function (request, response) {
     const url = request.params.url
     const manualRedirect = request.params.manualRedirect === 'true'
-    // remove url params
-    const parsedUrl = UrlUtil.parse(url)
-    parsedUrl.search = ''
-    if (manualRedirect) {
-      parsedUrl.search = 'manualredirect'
-    }
-    const finalUrl = UrlUtil.format(parsedUrl)
-    // const md5 = crypto.createHash('md5')
-    // const hash = md5.update(url).digest('hex')
-    // const hash = btoa(decodeURIComponent(url))
-    const hash = urlSlug.convert(finalUrl.replace("https://", ""))
+    const hash = btoa(decodeURIComponent(url))
     const filepath = `${URLS_DIRECTORY}/${hash}.html`
 
     if (fs.existsSync(filepath)) {
       response.json({ done: true, cached: true, hash  })
       return
     }
-    
-    // fetch substack page, extra meta tags
-    let htmlPage
+
     try {
-      const articleRequest = await fetch(finalUrl);
-      htmlPage = await articleRequest.text();
+      await generatePage(url, manualRedirect);
+      response.json({ done: true, hash })
     } catch (e) {
       response.json({ done: false, error: String(e)  })
-      return 
     }
-    
-    const dom = new JSDOM(htmlPage);
-    function query(str) {
-      return dom.window.document.querySelector(str).content
+  });
+
+  // 404 handler
+  app.use(async function(req, res, next) {
+    const path = req.path.slice(1); // Remove leading slash
+    try {
+      const decodedUrl = atob(path);
+      const pageData = await generatePage(decodedUrl);
+      res.render('article-card-template', pageData);
+    } catch (e) {
+      res.status(404).send('Not found');
     }
-    const title = query(`meta[property="og:title"]`) 
-    const description = query(`meta[property="og:description"]`) 
-    const image = query(`meta[name="twitter:image"]`) 
-    // create an html page to mimic those tags
-    const templateSource = fs.readFileSync('./views/article-card-template.handlebars', 'utf-8')
-    const generatedtemplate = expresshandlebars.handlebars.compile(templateSource);
-    fs.writeFileSync(filepath, generatedtemplate({ title, description, image, url: finalUrl, manualRedirect }), 'utf-8');
-    response.json({ done: true,hash })
   });
 
   const listener = app.listen(process.env.PORT, function () {
     console.log('Your app is listening on port ' + listener.address().port);
   });
-
 }
 
 run()
